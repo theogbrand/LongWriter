@@ -22,6 +22,7 @@ deepspeed --include localhost:0,1,2,3,4,5,6,7 main.py \
 --logging_dir "./logs/" \
 --deepspeed ds_config/stage3.json \
 --bf16 \
+--ddp_find_unused_parameters False \
 --gradient_checkpointing 1 \
 --adam_beta1 0.9 \
 --adam_beta2 0.95 \

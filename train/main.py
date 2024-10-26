@@ -133,10 +133,8 @@ def train():
         if training_args.fp16:
             model.to(torch.float16)
         #gradient checkpointing 
-        def make_input(module, input, output):
-            output.requires_grad_(True)
-        model.get_input_embeddings().register_forward_hook(make_input)
-        model = get_peft_model(model, lora_config)
+        if training_args.gradient_checkpointing: 
+           model.enable_input_require_grads() 
     
     
     if model_args.pack_loss:
