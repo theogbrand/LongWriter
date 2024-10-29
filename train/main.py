@@ -134,7 +134,7 @@ def train():
             model.to(torch.float16)
         #gradient checkpointing 
         if training_args.gradient_checkpointing: 
-           model.enable_input_require_grads() 
+            model.enable_input_require_grads() 
         model = get_peft_model(model, lora_config)
     
     if model_args.pack_loss:
