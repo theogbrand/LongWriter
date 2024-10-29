@@ -18,7 +18,7 @@ to organize the tokenized data for packing training.
 
 ### Model training
 
-We provide training scripts under `scripts/` for the GLM-4-9B and Llama-3.1-8B model series. Make sure to adjust `--model_name_or_path`, `--train_file`, and `--output_dir` to match your model path, data path, and output path.
+We provide training scripts under `scripts/` for the GLM-4-9B and Llama-3.1-8B model series. Make sure to adjust `--model_name_or_path`, `--train_file`, and `--output_dir` to match your model path, data path, and output path. We also support LoRA finetuning, see [scripts/llama3_longwriter_lora.sh](https://github.com/THUDM/LongWriter/blob/main/train/scripts/llama3_longwriter_lora.sh) for an example.
 
 To support packing training, we provide patch files under `patch/`, please replace the original modeling files with them.
 
