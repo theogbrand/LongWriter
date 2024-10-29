@@ -8,6 +8,7 @@ import transformers
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from dataset import LMDataset, LMSortDataset, LMPackDataset
 from trainer import TrainerNoShuffle
+from peft import LoraConfig, get_peft_model
 
 @dataclass
 class ModelArguments:
@@ -36,6 +37,11 @@ class DataArguments:
 class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     cache_dir: Optional[str] = field(default=None)
     optim: str = field(default="adamw_torch")
+    lora_enable: bool = False
+    lora_rank: int = 64
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05 
+    
 
 @dataclass
 class DataCollatorForLMDataset(object):
@@ -112,6 +118,25 @@ def train():
                                           trust_remote_code=True)
         tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path,
                                                   trust_remote_code=True)
+        
+    if training_args.lora_enable == True:
+        lora_config = LoraConfig(
+                r=training_args.lora_rank,
+                lora_alpha=training_args.lora_alpha,
+                target_modules='all-linear',
+                lora_dropout=training_args.lora_dropout,
+                bias='none',
+                task_type="CAUSAL_LM",
+            )
+        if training_args.bf16:
+            model.to(torch.bfloat16)
+        if training_args.fp16:
+            model.to(torch.float16)
+        #gradient checkpointing 
+        if training_args.gradient_checkpointing: 
+           model.enable_input_require_grads() 
+        model = get_peft_model(model, lora_config)
+    
     if model_args.pack_loss:
         model.pack_loss = True
     data_module = make_supervised_data_module(data_args=data_args)
