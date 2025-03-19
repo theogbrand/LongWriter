@@ -13,7 +13,9 @@ import re
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-GPT4_API_KEY = ''
+import os
+GPT4_API_KEY = os.getenv('OPENAI_API_KEY')
+
 GPT_MODEL = 'gpt-4o-2024-05-13'
 def get_response_gpt4(prompt, max_new_tokens=1024, temperature=1.0, stop=None):
     tries = 0
@@ -53,17 +55,18 @@ def get_response_gpt4(prompt, max_new_tokens=1024, temperature=1.0, stop=None):
     except: 
         return ''
 
-def get_pred(rank, world_size, data, max_new_tokens, fout, template):
-    for item in tqdm(data):
-        prompt = item['prompt']
-        prompt = template.replace('$INST$', prompt)
-        try:
-            response = get_response_gpt4(prompt, max_new_tokens)
-            item["plan"] = response
-            fout.write(json.dumps(item, ensure_ascii=False)+'\n')
-            fout.flush()
-        except Exception as e:
-            print(e)
+def get_pred(rank, world_size, data, max_new_tokens, out_file, template):
+    with open(out_file, 'a', encoding='utf-8') as fout:
+        for item in tqdm(data):
+            prompt = item['prompt']
+            prompt = template.replace('$INST$', prompt)
+            try:
+                response = get_response_gpt4(prompt, max_new_tokens)
+                item["plan"] = response
+                fout.write(json.dumps(item, ensure_ascii=False)+'\n')
+                fout.flush()
+            except Exception as e:
+                print(e)
 
 def seed_everything(seed):
     torch.manual_seed(seed)
@@ -81,12 +84,11 @@ if __name__ == '__main__':
     out_file = 'plan.jsonl'
     seed_everything(42)
     max_new_tokens = 4096
-    world_size = 8
+    world_size = 1
     has_data = {}
     if os.path.exists(out_file):
         with open(out_file, encoding='utf-8') as f:
             has_data = {json.loads(line)["prompt"]: 0 for line in f}
-    fout = open(out_file, 'a', encoding='utf-8')
     data = []
     with open(in_file, encoding='utf-8') as f:
         for line in f:
@@ -98,7 +100,7 @@ if __name__ == '__main__':
     data_subsets = [data[i::world_size] for i in range(world_size)]
     processes = []
     for rank in range(world_size):
-        p = mp.Process(target=get_pred, args=(rank, world_size, data_subsets[rank], max_new_tokens, fout, template))
+        p = mp.Process(target=get_pred, args=(rank, world_size, data_subsets[rank], max_new_tokens, out_file, template))
         p.start()
         processes.append(p)
     for p in processes:

@@ -12,8 +12,8 @@ import traceback
 import re
 import torch.distributed as dist
 import torch.multiprocessing as mp
-
-GPT4_API_KEY = ''
+import os
+GPT4_API_KEY = os.getenv('OPENAI_API_KEY')
 GPT_MODEL = 'gpt-4o-2024-05-13'
 def get_response_gpt4(prompt, max_new_tokens=1024, temperature=1.0, stop=None):
     tries = 0
@@ -53,39 +53,43 @@ def get_response_gpt4(prompt, max_new_tokens=1024, temperature=1.0, stop=None):
     except: 
         return ''
 
-def get_pred(rank, world_size, data, max_new_tokens, fout, template, cache_fout, cache_dict):
-    for item in tqdm(data):
-        try:
-            inst = item['prompt']
-            plan = item['plan'].strip().replace('\n\n', '\n')
-            steps = plan.split('\n')
-            text = ""
-            responses = []
-            if len(steps) > 50:
-                print(plan)
-                continue
-            for step in steps:
-                if inst in cache_dict and step in cache_dict[inst]:
-                    response = cache_dict[inst][step]
+def get_pred(rank, world_size, data, max_new_tokens, out_file, template, cache_file, cache_dict):
+    with open(out_file, 'a', encoding='utf-8') as fout, open(cache_file, 'a', encoding='utf-8') as cache_fout:
+        for item in tqdm(data):
+            try:
+                inst = item['prompt']
+                plan = item['plan'].strip().replace('\n\n', '\n')
+                steps = plan.split('\n')
+                text = ""
+                responses = []
+                if len(steps) > 50:
+                    print(plan)
+                    continue
+                for step in steps:
+                    print("Writing step:", step)
+                    if inst in cache_dict and step in cache_dict[inst]:
+                        response = cache_dict[inst][step]
+                        responses.append(response)
+                        text += response + '\n\n'
+                        print("current text:", text)
+                        continue
+                    prompt = template.replace('$INST$', inst).replace('$PLAN$', plan.strip()).replace('$TEXT$', text.strip()).replace('$STEP$', step.strip())
+                    print("Sending Prompt to write: ", prompt)
+                    response = get_response_gpt4(prompt, max_new_tokens)
+                    if response == '':
+                        break
+                    # save to cache
+                    cache_fout.write(json.dumps({"prompt": inst, "step": step, "response": response}, ensure_ascii=False)+'\n')
+                    cache_fout.flush()
                     responses.append(response)
                     text += response + '\n\n'
-                    continue
-                prompt = template.replace('$INST$', inst).replace('$PLAN$', plan.strip()).replace('$TEXT$', text.strip()).replace('$STEP$', step.strip())
-                response = get_response_gpt4(prompt, max_new_tokens)
                 if response == '':
-                    break
-                # save to cache
-                cache_fout.write(json.dumps({"prompt": inst, "step": step, "response": response}, ensure_ascii=False)+'\n')
-                cache_fout.flush()
-                responses.append(response)
-                text += response + '\n\n'
-            if response == '':
-                continue
-            item["write"] = responses
-            fout.write(json.dumps(item, ensure_ascii=False)+'\n')
-            fout.flush()
-        except Exception as e:
-            print(e)
+                    continue
+                item["write"] = responses
+                fout.write(json.dumps(item, ensure_ascii=False)+'\n')
+                fout.flush()
+            except Exception as e:
+                print(e)
 
 def seed_everything(seed):
     torch.manual_seed(seed)
@@ -97,6 +101,9 @@ def seed_everything(seed):
     torch.cuda.manual_seed_all(seed)
 
 if __name__ == '__main__':
+    # Set start method to 'spawn' or 'forkserver' instead of 'fork'
+    mp.set_start_method('spawn', force=True)
+    
     # input format: {"prompt": "xxx", "plan": "xxx", ...}
     # output format: {"prompt": "xxx", "plan": "xxx", "write": [...], ...}
     in_file = 'plan.jsonl'
@@ -104,7 +111,7 @@ if __name__ == '__main__':
     cache_file = 'write_cache.jsonl'
     seed_everything(42)
     max_new_tokens = 4096
-    world_size = 8
+    world_size = 1
     has_data = {}
     if os.path.exists(out_file):
         with open(out_file, encoding='utf-8') as f:
@@ -117,8 +124,7 @@ if __name__ == '__main__':
                 if item["prompt"] not in cache_dict:
                     cache_dict[item["prompt"]] = {}
                 cache_dict[item["prompt"]][item["step"]] = item["response"]
-    fout = open(out_file, 'a', encoding='utf-8')
-    cache_fout = open(cache_file, 'a', encoding='utf-8')
+    
     data = []
     with open(in_file, encoding='utf-8') as f:
         for line in f:
@@ -130,7 +136,7 @@ if __name__ == '__main__':
     data_subsets = [data[i::world_size] for i in range(world_size)]
     processes = []
     for rank in range(world_size):
-        p = mp.Process(target=get_pred, args=(rank, world_size, data_subsets[rank], max_new_tokens, fout, template, cache_fout, cache_dict))
+        p = mp.Process(target=get_pred, args=(rank, world_size, data_subsets[rank], max_new_tokens, out_file, template, cache_file, cache_dict))
         p.start()
         processes.append(p)
     for p in processes:
